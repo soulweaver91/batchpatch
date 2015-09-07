@@ -41,7 +41,7 @@ Additionally, switches `-v` and `-h` for version info and help are supported.
 ## What constitutes a suitable pair of files for a patch?
 The internal regular expression splits each filename it comes across into a few distinct pieces in this order:
 
-*   Group short name, if present.
+*   Group short name in square brackets, if present.
 *   Main name.
 *   Episode number (also allowing alphabets, i.e. "S1" or "NCOP2" are valid episode numbers), if present. A leading dash
     surrounded by spaces is expected before the number.
