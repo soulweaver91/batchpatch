@@ -108,6 +108,14 @@ class BatchPatch:
             metavar='level'
         )
         parser.add_argument(
+            '-x', '--xdelta',
+            action='store',
+            help='An alternative location for the xdelta3 executable to search instead of '
+                 'the same directory as the script.',
+            default=self.xdelta_location,
+            metavar='path'
+        )
+        parser.add_argument(
             '-v', '--version',
             action='version',
             version="{} version {}".format(self.PROG_NAME, self.PROG_VERSION)
@@ -115,6 +123,11 @@ class BatchPatch:
 
         args = parser.parse_args()
         self.log_level = LogLevel[args.loglevel]
+
+        if args.xdelta is not None:
+            self.xdelta_location = args.xdelta
+            self.log('Custom xdelta location \'{}\' read from the command line.'.format(args.xdelta),
+                     LogLevel.debug)
 
         self.print_welcome()
         self.check_prerequisites(args)
@@ -160,7 +173,7 @@ class BatchPatch:
             else:
                 self.log('\'{}\' was found.'.format(path), LogLevel.debug)
 
-        self.log('Verifying a xdelta executable is found in the same folder as this script.', LogLevel.debug)
+        self.log('Verifying a xdelta executable is found from the specified location.', LogLevel.debug)
 
         if not os.path.exists(self.xdelta_location) or not os.path.isfile(self.xdelta_location):
             self.log('The xdelta3 executable could not be found at \'{}\'!'.format(self.xdelta_location),
@@ -184,7 +197,7 @@ class BatchPatch:
         for pair in file_pairs:
             self.log('Creating patch: {} -> {}'.format(pair[0], pair[1]), LogLevel.notice)
             cmd = [
-                'xdelta3',
+                self.xdelta_location,
                 '-e',        # Create patch
                 '-v' if self.log_level.numval <= LogLevel.notice.numval else '',  # Use verbose with verbose loglv
                 '-9',        # Use maximum compression
@@ -214,7 +227,7 @@ class BatchPatch:
         fh.write('set nnum=0\n')
         fh.write('set fnum=0\n\n')
 
-        fh.write('IF NOT EXIST "xdelta3.exe" (\n')
+        fh.write('IF NOT EXIST "{}" (\n'.format(os.path.basename(self.xdelta_location)))
         fh.write('  echo The xdelta executable was not found! It is required for this script to work!\n')
         fh.write('  pause\n')
         fh.write('  exit /b 1\n')
@@ -227,7 +240,7 @@ class BatchPatch:
                     '  IF NOT EXIST "{new}" (\n'
                     '    echo Patching {old_esc}...\n'
                     '    set /a pnum+=1\n'
-                    '    xdelta3 -d -v -s "{old}" "{patch}" "{new}" || (\n'
+                    '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n'
                     '      echo Patching {old_esc} failed!\n'
                     '      set /a pnum-=1\n'
                     '      set /a fnum+=1\n'
@@ -245,7 +258,8 @@ class BatchPatch:
                     new=os.path.basename(pair[1]),
                     patch=os.path.basename(pair[2]),
                     old_esc=self.cmd_escape(os.path.basename(pair[0])),
-                    new_esc=self.cmd_escape(os.path.basename(pair[1]))
+                    new_esc=self.cmd_escape(os.path.basename(pair[1])),
+                    xdelta=os.path.basename(self.xdelta_location)
                 )
             )
 

@@ -23,9 +23,9 @@ After cloning the repository, install dependencies:
 That's it.
 
 ## Usage
-```python batchpatch.py -o "olddir" -n "newdir" -t "patchdir" -l loglevel```
+```python batchpatch.py -o "olddir" -n "newdir" [-t "patchdir"] [-l loglevel] [-x "xdelta_path"]```
 
-*   `olddir` and `newdir` must both be existing directories. For each detected file representing a certain content,
+*   `olddir` and `newdir` must both be existing directories. For each detected file representing certain content,
     the highest version in each folder is compared and patched. These both are required for obvious reasons.
 *   `patchdir` doesn't have to exist prior to running the script. If not set, the patches will be created under a
     time based automatic folder under the working directory.
@@ -35,6 +35,7 @@ That's it.
     * `warning`
     * `error`
     * `silent` (doesn't print anything)
+*   `xdelta_path` defines an alternate location for the xdelta executable.
     
 Additionally, switches `-v` and `-h` for version info and help are supported.
 
