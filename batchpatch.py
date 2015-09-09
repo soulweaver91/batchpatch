@@ -61,7 +61,9 @@ class BatchPatch:
             self.log(re.sub(r'[^\u0000-\u007f]', '?', msg), level)
 
     def print_welcome(self):
-        print('{} version {}'.format(self.PROG_NAME, self.PROG_VERSION))
+        # Print this even on the highest levels, but not on silent, and without the log prefix
+        if self.log_level != LogLevel.silent:
+            print('{} version {}'.format(self.PROG_NAME, self.PROG_VERSION))
 
     def get_version(self):
         return self.PROG_VERSION
@@ -199,13 +201,19 @@ class BatchPatch:
             cmd = [
                 self.xdelta_location,
                 '-e',        # Create patch
-                '-v' if self.log_level.numval <= LogLevel.notice.numval else '',  # Use verbose with verbose loglv
                 '-9',        # Use maximum compression
                 '-s',        # Read from file
                 pair[0],     # Old file
                 pair[1],     # New file
                 os.path.join(target_dir, pair[2])    # Patch destination
             ]
+
+            if self.log_level.numval <= LogLevel.notice.numval:
+                # Pass verbose flag to xdelta if using a relatively verbose logging level
+                cmd.insert(2, '-v')
+            elif self.log_level.numval == LogLevel.silent.numval:
+                # Pass quiet flag if using the silent logging level
+                cmd.insert(2, '-q')
 
             try:
                 self.log('Starting subprocess, command line: {}'.format(" ".join(cmd)), LogLevel.debug)
