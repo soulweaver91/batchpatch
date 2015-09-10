@@ -66,6 +66,8 @@ timestamped directory in the same folder as the script itself.
     * `{type}` - A shorthand for `{specifier}{ext}`, representing a specific release format of the series.
     
     The default pattern is `{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff`.
+*   `-z`, `--zip`: Additionally create a ZIP archive out of the output files.
+*   `--zip-name name`: The name for the patch archive, if `-z` was used. Defaults to `patch.zip`.
 
 ## What constitutes a suitable pair of files for a patch?
 The internal regular expression splits each filename it comes across into a few distinct pieces in this order:

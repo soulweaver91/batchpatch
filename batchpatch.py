@@ -11,6 +11,7 @@ import colorama
 import subprocess
 import unicodedata
 import gettext
+from zipfile import ZipFile
 from datetime import datetime
 from dateutil import tz
 from logger import LogLevel, Logger
@@ -28,6 +29,10 @@ class BatchPatch:
     }
     patch_options = {
         'filename_pattern': None
+    }
+    archive_options = {
+        'create_zip': False,
+        'zip_name': 'patch'
     }
 
     log_level = LogLevel.notice
@@ -104,6 +109,19 @@ class BatchPatch:
             metavar='path'
         )
         parser.add_argument(
+            '-z', '--zip',
+            action='store_true',
+            help='Create a ZIP file out of the created patch files.',
+            default=self.xdelta_location
+        )
+        parser.add_argument(
+            '--zip-name',
+            action='store',
+            help='The filename to save the ZIP with. Only meaningful if -z was set.',
+            default='patch.zip',
+            metavar='path'
+        )
+        parser.add_argument(
             '--script-lang',
             action='store',
             help='The language to use in the generated script.',
@@ -137,6 +155,7 @@ class BatchPatch:
         self.script_options['script_lang'] = args.script_lang
         self.script_options['script_name'] = args.script_name
         self.patch_options['filename_pattern'] = args.patch_pattern
+        self.archive_options['zip_name'] = args.zip_name
 
         if args.xdelta is not None:
             self.xdelta_location = args.xdelta
@@ -154,6 +173,10 @@ class BatchPatch:
             self.generate_patches(file_pairs, args.target)
             self.generate_win_script(file_pairs, args.target)
             self.copy_executable(args.target)
+
+            if args.zip is not None:
+                self.create_archive(file_pairs, args.target)
+
             self.logger.log('Done.', LogLevel.notice)
         else:
             self.logger.log('No files to generate patches for.', LogLevel.notice)
@@ -297,6 +320,24 @@ class BatchPatch:
         self.logger.log('Copying xdelta to the target folder {}.'.format(target_dir), LogLevel.debug)
         shutil.copy(os.path.join(os.getcwd(), self.xdelta_location),
                     os.path.join(target_dir, os.path.basename(self.xdelta_location)))
+
+    def create_archive(self, file_pairs, target_dir):
+        zip_path = os.path.join(target_dir, self.archive_options['zip_name'])
+        self.logger.log('Creating a ZIP archive of the patch to \'{}\'.'.format(zip_path), LogLevel.debug)
+        zip = ZipFile(zip_path, 'w')
+
+        for pair in file_pairs:
+            self.logger.log('Writing: {}...'.format(pair[2]), LogLevel.debug)
+            zip.write(os.path.join(target_dir, pair[2]), pair[2])
+
+        self.logger.log('Writing the patch script...', LogLevel.debug)
+        zip.write(os.path.join(target_dir, self.script_options['script_name'] + '.cmd'),
+                  self.script_options['script_name'] + '.cmd')
+
+        self.logger.log('Writing the executable...', LogLevel.debug)
+        zip.write(os.path.join(target_dir, os.path.basename(self.xdelta_location)),
+                  os.path.basename(self.xdelta_location))
+        zip.close()
 
     def identify_file_pairs_by_name(self, old_dir, new_dir):
         self.logger.log('Identifying potential file pairs for patching.', LogLevel.debug)
