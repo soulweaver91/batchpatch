@@ -22,22 +22,30 @@ After cloning the repository, install dependencies:
 
 That's it.
 
-## Usage
-```python batchpatch.py -o "olddir" -n "newdir" [-t "patchdir"] [-l loglevel] [-x "xdelta_path"]```
+## Basic usage
+```python batchpatch.py -o "olddir" -n "newdir"```
 
-*   `olddir` and `newdir` must both be existing directories. For each detected file representing certain content,
-    the highest version in each folder is compared and patched. These both are required for obvious reasons.
-*   `patchdir` doesn't have to exist prior to running the script. If not set, the patches will be created under a
-    time based automatic folder under the working directory.
-*   `loglevel` controls the amount of output the script will print. Valid values are, in order of verbosity:
+This will create patches for each matching pair of files between the folders `olddir` and `newdir` into a new 
+timestamped directory in the same folder as the script itself.
+
+## Switch reference
+*   `-o dir`, `--olddir dir`: Specifies the directory with the old files.
+*   `-n dir`, `--newdir dir`: Specifies the directory with the new files.
+*   `-t dir`, `--target dir`: Specifies where the patch files and the script should be written to. It will be created
+    if it does not yet exist.
+*   `-l level`, `--loglevel level`: Controls the amount of output the script will print.
+    Valid values are, in order of verbosity:
     * `debug` (prints everything)
     * `notice` (default if not set)
     * `warning`
     * `error`
     * `silent` (doesn't print anything)
-*   `xdelta_path` defines an alternate location for the xdelta executable.
-    
-Additionally, switches `-v` and `-h` for version info and help are supported.
+*   `-x path`, `--xdelta_path path`: defines an alternate location for the xdelta executable. By default, one is
+    expected to be located in the same folder as the script.
+*   `-v`, `--version`: Prints the version information and exits.
+*   `-h`, `--help`: Prints a help message, which contains more or less the same information as this section.
+*   `--script-lang lang`: Selects another language to use when writing the automatic patch applying script.
+    Allowed values are defined by the present subfolders in the `i18n` directory.
 
 ## What constitutes a suitable pair of files for a patch?
 The internal regular expression splits each filename it comes across into a few distinct pieces in this order:

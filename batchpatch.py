@@ -10,6 +10,7 @@ import shutil
 import colorama
 import subprocess
 import unicodedata
+import gettext
 from datetime import datetime
 from dateutil import tz
 from logger import LogLevel, Logger
@@ -18,17 +19,22 @@ from logger import LogLevel, Logger
 class BatchPatch:
     PROG_NAME = 'BatchPatch'
     PROG_VERSION = '0.1'
+    LOCALE_CATALOG = 'batchpatch'
 
     logger = None
+    script_options = {
+        'script_lang': 'en_US'
+    }
 
     log_level = LogLevel.notice
     xdelta_location = ''
+    locale_dir = ''
 
     def __init__(self):
         colorama.init()
 
-        my_path = os.path.dirname(os.path.realpath(__file__))
-        self.xdelta_location = os.path.join(my_path, 'xdelta3.exe')
+        self.xdelta_location = os.path.join(BatchPatch.get_install_path(), 'xdelta3.exe')
+        self.locale_dir = os.path.join(BatchPatch.get_install_path(), 'i18n')
 
     def print_welcome(self):
         # Print this even on the highest levels, but not on silent, and without the log prefix
@@ -40,6 +46,12 @@ class BatchPatch:
 
     def get_name(self):
         return self.PROG_NAME
+
+    def switch_languages(self, lang):
+        try:
+            gettext.translation('batchpatch', self.locale_dir, languages=[lang, 'en_US']).install()
+        except OSError as e:
+            self.logger.log('Selecting language {} failed: {}'.format(lang, e.strerror), LogLevel.error)
 
     def run(self):
         parser = argparse.ArgumentParser(
@@ -88,6 +100,14 @@ class BatchPatch:
             metavar='path'
         )
         parser.add_argument(
+            '--script-lang',
+            action='store',
+            help='The language to use in the generated script.',
+            default='en_US',
+            choices=[d for d in os.listdir(self.locale_dir) if os.path.isdir(os.path.join(self.locale_dir, d))],
+            metavar='lang_code'
+        )
+        parser.add_argument(
             '-v', '--version',
             action='version',
             version="{} version {}".format(self.PROG_NAME, self.PROG_VERSION)
@@ -96,6 +116,7 @@ class BatchPatch:
         args = parser.parse_args()
         self.log_level = LogLevel[args.loglevel]
         self.logger = Logger(self.log_level)
+        self.script_options['script_lang'] = args.script_lang
 
         if args.xdelta is not None:
             self.xdelta_location = args.xdelta
@@ -195,6 +216,8 @@ class BatchPatch:
                 self.logger.log('Starting the subprocess failed! ' + e.strerror, LogLevel.warning)
 
     def generate_win_script(self, file_pairs, target_dir):
+        self.switch_languages(self.script_options['script_lang'])
+
         fh = open(os.path.join(target_dir, 'apply.cmd'), mode='w', newline='\r\n', encoding='utf-8')
         self.logger.log('Generating Windows update script.'.format(str(len(file_pairs))), LogLevel.debug)
         fh.write('@echo off\n\n')
@@ -206,7 +229,9 @@ class BatchPatch:
         fh.write('set fnum=0\n\n')
 
         fh.write('IF NOT EXIST "{}" (\n'.format(os.path.basename(self.xdelta_location)))
-        fh.write('  echo The xdelta executable was not found! It is required for this script to work!\n')
+        fh.write('  echo {msg}\n'.format(
+            msg=_('The xdelta executable was not found! It is required for this script to work!'))
+        )
         fh.write('  pause\n')
         fh.write('  exit /b 1\n')
         fh.write(')\n\n')
@@ -214,22 +239,22 @@ class BatchPatch:
         for pair in file_pairs:
             fh.write(
                 (
-                    'IF EXIST "{old}" (\n'
-                    '  IF NOT EXIST "{new}" (\n'
-                    '    echo Patching {old_esc}...\n'
-                    '    set /a pnum+=1\n'
-                    '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n'
-                    '      echo Patching {old_esc} failed!\n'
-                    '      set /a pnum-=1\n'
-                    '      set /a fnum+=1\n'
-                    '    )\n'
-                    '  ) ELSE (\n'
-                    '    echo {new_esc} already exists, skipping...\n'
-                    '    set /a nnum+=1\n'
-                    '  )\n'
-                    ') ELSE (\n'
-                    '  echo {old_esc} not present in folder, skipping...\n'
-                    '  set /a nnum+=1\n'
+                    'IF EXIST "{old}" (\n' +
+                    '  IF NOT EXIST "{new}" (\n' +
+                    '    echo {msg}\n'.format(msg=_('Patching {old_esc}...')) +
+                    '    set /a pnum+=1\n' +
+                    '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n' +
+                    '      echo {msg}\n'.format(msg=_('Patching {old_esc} failed!')) +
+                    '      set /a pnum-=1\n' +
+                    '      set /a fnum+=1\n' +
+                    '    )\n' +
+                    '  ) ELSE (\n' +
+                    '    echo {msg}\n'.format(msg=_('{new_esc} already exists, skipping...')) +
+                    '    set /a nnum+=1\n' +
+                    '  )\n' +
+                    ') ELSE (\n' +
+                    '  echo {msg}\n'.format(msg=_('{old_esc} not present in folder, skipping...')) +
+                    '  set /a nnum+=1\n' +
                     ')\n'
                 ).format(
                     old=os.path.basename(pair[0]),
@@ -241,9 +266,11 @@ class BatchPatch:
                 )
             )
 
-        fh.write('echo Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.\n')
+        fh.write('echo {msg}\n'.format(msg=_('Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.')))
         fh.write('pause\n')
         fh.close()
+
+        self.switch_languages('en_US')
 
     def copy_executable(self, target_dir):
         self.logger.log('Copying xdelta to the target folder {}.'.format(target_dir), LogLevel.debug)
@@ -393,7 +420,13 @@ class BatchPatch:
         s = u"".join([c for c in s if not unicodedata.combining(c)])
         return re.sub(r'[^a-z0-9_-]', '_', s.casefold())
 
+    @staticmethod
+    def get_install_path():
+        return os.path.dirname(os.path.realpath(__file__))
+
 
 if __name__ == "__main__":
+    gettext.install('batchpatch', os.path.join(BatchPatch.get_install_path(), 'i18n'))
+
     prog = BatchPatch()
     prog.run()

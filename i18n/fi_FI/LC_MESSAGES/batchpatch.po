@@ -1,0 +1,42 @@
+# BatchPatch translation file
+# Copyright (C) 2015
+# Soulweaver <soulweaver@hotmail.fi>
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"POT-Creation-Date: 2015-09-10 01:58+0300\n"
+"PO-Revision-Date: 2015-09-10 02:01+0300\n"
+"Language-Team: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: pygettext.py 1.5\n"
+"X-Generator: Poedit 1.8.4\n"
+"Last-Translator: Soulweaver <soulweaver@hotmail.fi>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: fi_FI\n"
+
+#: batchpatch.py:215
+msgid "The xdelta executable was not found! It is required for this script to work!"
+msgstr "xdelta-sovellusta ei löytynyt! Se tarvitaan tämän skriptin suorittamiseksi!"
+
+#: batchpatch.py:226
+msgid "Patching {old_esc}..."
+msgstr "Päivitetään {old_esc}..."
+
+#: batchpatch.py:229
+msgid "Patching {old_esc} failed!"
+msgstr "Tiedoston {old_esc} päivittäminen epäonnistui!"
+
+#: batchpatch.py:234
+msgid "{new_esc} already exists, skipping..."
+msgstr "{new_esc} on jo ajan tasalla, ohitetaan..."
+
+#: batchpatch.py:238
+msgid "{old_esc} not present in folder, skipping..."
+msgstr "Tiedostoa {old_esc} ei löytynyt kansiosta, ohitetaan..."
+
+#: batchpatch.py:251
+msgid "Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed."
+msgstr "Päivittäminen valmistui. %pnum% tiedostoa päivitettiin, %nnum% tiedostoa ohitettiin ja %fnum% tiedoston päivittäminen epäonnistui."

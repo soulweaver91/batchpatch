@@ -47,8 +47,11 @@ coverage.xml
 *,cover
 
 # Translations
-*.mo
-*.pot
+# Even though it's usually discouraged, we do want to distribute the compiled catalogs.
+# Having to manually do that would be a pointless obstacle to the users of the script,
+# when right now there is no need for separate release packages anyway.
+#*.mo
+#*.pot
 
 # Django stuff:
 *.log
