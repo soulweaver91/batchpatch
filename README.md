@@ -46,6 +46,8 @@ timestamped directory in the same folder as the script itself.
 *   `-h`, `--help`: Prints a help message, which contains more or less the same information as this section.
 *   `--script-lang lang`: Selects another language to use when writing the automatic patch applying script.
     Allowed values are defined by the present subfolders in the `i18n` directory.
+*   `--script-name name`: Specifies the filename to use for the patch script, without the file extension.
+    Default name is 'apply'.
 
 ## What constitutes a suitable pair of files for a patch?
 The internal regular expression splits each filename it comes across into a few distinct pieces in this order:
