@@ -26,6 +26,9 @@ class BatchPatch:
         'script_lang': 'en_US',
         'script_name': 'apply'
     }
+    patch_options = {
+        'filename_pattern': None
+    }
 
     log_level = LogLevel.notice
     xdelta_location = ''
@@ -116,6 +119,13 @@ class BatchPatch:
             metavar='name'
         )
         parser.add_argument(
+            '--patch-pattern',
+            action='store',
+            help='The filename to use for the patch files. Consult README.md for available variables.',
+            default='{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff',
+            metavar='name'
+        )
+        parser.add_argument(
             '-v', '--version',
             action='version',
             version="{} version {}".format(self.PROG_NAME, self.PROG_VERSION)
@@ -126,6 +136,7 @@ class BatchPatch:
         self.logger = Logger(self.log_level)
         self.script_options['script_lang'] = args.script_lang
         self.script_options['script_name'] = args.script_name
+        self.patch_options['filename_pattern'] = args.patch_pattern
 
         if args.xdelta is not None:
             self.xdelta_location = args.xdelta
@@ -366,22 +377,31 @@ class BatchPatch:
     def cmd_escape(s):
         return re.sub(r'([\[\]\(\)^<>|])', r'^\1', s)
 
-    @staticmethod
-    def get_patch_name(source, target):
-        return "{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff".format(
-            name=BatchPatch.neutralize_str(source['name']),
-            type=BatchPatch.neutralize_str(source['specifier'] + source['ext']),
-            group=BatchPatch.neutralize_str(source['group']),
-            ep=BatchPatch.neutralize_str(source['ep']),
-            v_old=source['ver'],
-            v_new=target['ver'],
-            specifier=BatchPatch.neutralize_str(source['specifier']),
-            specifier_items=[BatchPatch.neutralize_str(s) for s in (
-                source['specifier'].split() if len(source['specifier']) > 0 else ['']
-            )],
-            ext=BatchPatch.neutralize_str(source['ext'])
-        )
-        pass
+    def get_patch_name(self, source, target):
+        try:
+            return self.patch_options['filename_pattern'].format(
+                raw_group=source['group'],
+                raw_name=source['name'],
+                raw_ep=source['ep'],
+                raw_specifier=source['specifier'],
+                raw_ext=source['ext'],
+                group=BatchPatch.neutralize_str(source['group']),
+                name=BatchPatch.neutralize_str(source['name']),
+                ep=BatchPatch.neutralize_str(source['ep']),
+                specifier=BatchPatch.neutralize_str(source['specifier']),
+                specifier_items=[BatchPatch.neutralize_str(s) for s in (
+                    source['specifier'].split() if len(source['specifier']) > 0 else ['']
+                )],
+                type=BatchPatch.neutralize_str(source['specifier'] + source['ext']),
+                ext=BatchPatch.neutralize_str(source['ext']),
+                v_old=source['ver'],
+                v_new=target['ver'],
+                hash_old=source['crc'],
+                hash_new=target['crc']
+            )
+        except KeyError as e:
+            self.logger.log('Invalid variable {} in patch name pattern!'.format(e.args[0]), LogLevel.error)
+            exit()
 
     @staticmethod
     def create_file_entity(filename, basedir):

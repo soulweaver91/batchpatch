@@ -48,6 +48,24 @@ timestamped directory in the same folder as the script itself.
     Allowed values are defined by the present subfolders in the `i18n` directory.
 *   `--script-name name`: Specifies the filename to use for the patch script, without the file extension.
     Default name is 'apply'.
+*   `--patch-pattern pattern`: Specifies the pattern used for the filenames of the patch files. Variables are enclosed
+    in curly brackets, everything else will be used as is. The available variables are as follows:
+    * `{raw_group}`, `{raw_name}`, `{raw_ep}`, `{raw_specifier}`, `{raw_ext}` - Unmodified versions of the
+      corresponding variables listed below. Most of the variables are run through a normalization filter that
+      changes letters to lowercase, strips accents, and converts spaces and most other characters to underscores.
+    * `{group}` - The group short name.
+    * `{name}` - The series name.
+    * `{ep}` - The episode number.
+    * `{v_old}`, `{v_new}` - The versions of the two files. Plain numbers, 1 is set for files with no version number
+      found in the filename.
+    * `{hash_old}`, `{hash_new}` - The CRC hashes of the two files.
+    * `{specifier}` - The specifier located after the episode/version number in parentheses, if present.
+    * `{specifier_items}` - An array version of the above variable, split by spaces. This way you can pick a certain
+      piece, e.g. the resolution from "1080p 10bit".
+    * `{ext}` - The file extension.
+    * `{type}` - A shorthand for `{specifier}{ext}`, representing a specific release format of the series.
+    
+    The default pattern is `{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff`.
 
 ## What constitutes a suitable pair of files for a patch?
 The internal regular expression splits each filename it comes across into a few distinct pieces in this order:
