@@ -10,64 +10,57 @@ import shutil
 import colorama
 import subprocess
 import unicodedata
-from enum import Enum
+import gettext
+from zipfile import ZipFile
 from datetime import datetime
 from dateutil import tz
-
-
-class LogLevel(Enum):
-    debug = (1, 'DEBUG',  colorama.Fore.GREEN + colorama.Style.BRIGHT)
-    notice = (2, 'NOTICE', colorama.Fore.WHITE + colorama.Style.NORMAL)
-    warning = (3, 'WARN',   colorama.Fore.YELLOW + colorama.Style.BRIGHT)
-    error = (4, 'ERROR',  colorama.Fore.RED + colorama.Style.NORMAL)
-    silent = (5, '', '')
-
-    def __init__(self, val, log_prefix, log_color):
-        self.numval = val
-        self.log_prefix = log_prefix
-        self.log_color = log_color
-
-    @classmethod
-    def max_width(cls):
-        return max([len(i.log_prefix) for i in cls])
+from logger import LogLevel, Logger
 
 
 class BatchPatch:
     PROG_NAME = 'BatchPatch'
-    PROG_VERSION = '0.1'
+    PROG_VERSION = '0.2'
+    LOCALE_CATALOG = 'batchpatch'
+
+    logger = None
+    script_options = {
+        'script_lang': 'en_US',
+        'script_name': 'apply'
+    }
+    patch_options = {
+        'filename_pattern': None
+    }
+    archive_options = {
+        'create_zip': False,
+        'zip_name': 'patch'
+    }
 
     log_level = LogLevel.notice
     xdelta_location = ''
+    locale_dir = ''
 
     def __init__(self):
         colorama.init()
 
-        my_path = os.path.dirname(os.path.realpath(__file__))
-        self.xdelta_location = os.path.join(my_path, 'xdelta3.exe')
-
-    def log(self, msg, level):
-        try:
-            if level.numval >= self.log_level.numval:
-                print(("{}[{}] {:>" + str(LogLevel.max_width()) + "}: {}{}").format(
-                    level.log_color,
-                    time.strftime('%Y-%m-%d %H:%M:%S'),
-                    level.log_prefix,
-                    msg,
-                    colorama.Style.RESET_ALL
-                ))
-        except UnicodeEncodeError:
-            self.log('A message sent to the logger could not be printed properly due to an encoding problem. '
-                     'An ASCII-safe version of the original message follows.', LogLevel.warning)
-            self.log(re.sub(r'[^\u0000-\u007f]', '?', msg), level)
+        self.xdelta_location = os.path.join(BatchPatch.get_install_path(), 'xdelta3.exe')
+        self.locale_dir = os.path.join(BatchPatch.get_install_path(), 'i18n')
 
     def print_welcome(self):
-        print('{} version {}'.format(self.PROG_NAME, self.PROG_VERSION))
+        # Print this even on the highest levels, but not on silent, and without the log prefix
+        if self.log_level != LogLevel.silent:
+            print('{} version {}'.format(self.PROG_NAME, self.PROG_VERSION))
 
     def get_version(self):
         return self.PROG_VERSION
 
     def get_name(self):
         return self.PROG_NAME
+
+    def switch_languages(self, lang):
+        try:
+            gettext.translation('batchpatch', self.locale_dir, languages=[lang, 'en_US']).install()
+        except OSError as e:
+            self.logger.log('Selecting language {} failed: {}'.format(lang, e.strerror), LogLevel.error)
 
     def run(self):
         parser = argparse.ArgumentParser(
@@ -108,6 +101,49 @@ class BatchPatch:
             metavar='level'
         )
         parser.add_argument(
+            '-x', '--xdelta',
+            action='store',
+            help='An alternative location for the xdelta3 executable to search instead of '
+                 'the same directory as the script.',
+            default=self.xdelta_location,
+            metavar='path'
+        )
+        parser.add_argument(
+            '-z', '--zip',
+            action='store_true',
+            help='Create a ZIP file out of the created patch files.',
+            default=self.xdelta_location
+        )
+        parser.add_argument(
+            '--zip-name',
+            action='store',
+            help='The filename to save the ZIP with. Only meaningful if -z was set.',
+            default='patch.zip',
+            metavar='path'
+        )
+        parser.add_argument(
+            '--script-lang',
+            action='store',
+            help='The language to use in the generated script.',
+            default='en_US',
+            choices=[d for d in os.listdir(self.locale_dir) if os.path.isdir(os.path.join(self.locale_dir, d))],
+            metavar='lang_code'
+        )
+        parser.add_argument(
+            '--script-name',
+            action='store',
+            help='The filename to use for the generated script, without the extension. \'apply\' by default.',
+            default='apply',
+            metavar='name'
+        )
+        parser.add_argument(
+            '--patch-pattern',
+            action='store',
+            help='The filename to use for the patch files. Consult README.md for available variables.',
+            default='{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff',
+            metavar='name'
+        )
+        parser.add_argument(
             '-v', '--version',
             action='version',
             version="{} version {}".format(self.PROG_NAME, self.PROG_VERSION)
@@ -115,6 +151,16 @@ class BatchPatch:
 
         args = parser.parse_args()
         self.log_level = LogLevel[args.loglevel]
+        self.logger = Logger(self.log_level)
+        self.script_options['script_lang'] = args.script_lang
+        self.script_options['script_name'] = args.script_name
+        self.patch_options['filename_pattern'] = args.patch_pattern
+        self.archive_options['zip_name'] = args.zip_name
+
+        if args.xdelta is not None:
+            self.xdelta_location = args.xdelta
+            self.logger.log('Custom xdelta location \'{}\' read from the command line.'.format(args.xdelta),
+                            LogLevel.debug)
 
         self.print_welcome()
         self.check_prerequisites(args)
@@ -127,66 +173,68 @@ class BatchPatch:
             self.generate_patches(file_pairs, args.target)
             self.generate_win_script(file_pairs, args.target)
             self.copy_executable(args.target)
-            self.log('Done.', LogLevel.notice)
+
+            if args.zip is not None:
+                self.create_archive(file_pairs, args.target)
+
+            self.logger.log('Done.', LogLevel.notice)
         else:
-            self.log('No files to generate patches for.', LogLevel.notice)
+            self.logger.log('No files to generate patches for.', LogLevel.notice)
 
     def check_prerequisites(self, args):
-        self.log('Checking prerequisites.', LogLevel.debug)
+        self.logger.log('Checking prerequisites.', LogLevel.debug)
         for p in ('old', 'new', 'target'):
-            self.log('Verifying existence of {} directory.'.format(p), LogLevel.debug)
+            self.logger.log('Verifying existence of {} directory.'.format(p), LogLevel.debug)
             try:
                 path = getattr(args, p)
             except AttributeError:
-                self.log('Expected parameter \'{}\' was missing!'.format(p), LogLevel.error)
+                self.logger.log('Expected parameter \'{}\' was missing!'.format(p), LogLevel.error)
                 exit()
 
             if not os.path.isdir(path):
                 if p != 'target':
-                    self.log('{} is not a valid path!'.format(path), LogLevel.error)
+                    self.logger.log('{} is not a valid path!'.format(path), LogLevel.error)
                     exit()
                 else:
                     if os.path.exists(path):
-                        self.log('\'{}\' exists and is not a directory!'.format(path), LogLevel.error)
+                        self.logger.log('\'{}\' exists and is not a directory!'.format(path), LogLevel.error)
                         exit()
                     else:
-                        self.log('Creating output directory \'{}\'.'.format(path), LogLevel.notice)
+                        self.logger.log('Creating output directory \'{}\'.'.format(path), LogLevel.notice)
                         try:
                             os.makedirs(path)
                         except OSError as e:
-                            self.log('Error while creating directory \'{]\': {}'.format(path, e.strerror),
-                                     LogLevel.error)
+                            self.logger.log('Error while creating directory \'{]\': {}'.format(path, e.strerror),
+                                            LogLevel.error)
                             exit()
             else:
-                self.log('\'{}\' was found.'.format(path), LogLevel.debug)
+                self.logger.log('\'{}\' was found.'.format(path), LogLevel.debug)
 
-        self.log('Verifying a xdelta executable is found in the same folder as this script.', LogLevel.debug)
+        self.logger.log('Verifying a xdelta executable is found from the specified location.', LogLevel.debug)
 
         if not os.path.exists(self.xdelta_location) or not os.path.isfile(self.xdelta_location):
-            self.log('The xdelta3 executable could not be found at \'{}\'!'.format(self.xdelta_location),
-                     LogLevel.error
-            )
-            self.log('Please download correct version for your system from the xdelta site or', LogLevel.error)
-            self.log('compile it yourself, and then add it to the same directory as this script', LogLevel.error)
-            self.log('under the name xdelta3.exe.', LogLevel.error)
+            self.logger.log('The xdelta3 executable could not be found at \'{}\'!'.format(self.xdelta_location),
+                            LogLevel.error)
+            self.logger.log('Please download correct version for your system from the xdelta site or', LogLevel.error)
+            self.logger.log('compile it yourself, and then add it to the same directory as this script', LogLevel.error)
+            self.logger.log('under the name xdelta3.exe.', LogLevel.error)
             exit()
 
         if not os.access(self.xdelta_location, os.X_OK):
-            self.log('The xdelta3 executable at \'{}\' doesn\'t have execution permissions!'.format(
+            self.logger.log('The xdelta3 executable at \'{}\' doesn\'t have execution permissions!'.format(
                 self.xdelta_location), LogLevel.error
             )
             exit()
 
-        self.log('Prerequisites OK.', LogLevel.debug)
+        self.logger.log('Prerequisites OK.', LogLevel.debug)
 
     def generate_patches(self, file_pairs, target_dir):
-        self.log('Generating patches for {} file pairs.'.format(str(len(file_pairs))), LogLevel.debug)
+        self.logger.log('Generating patches for {} file pairs.'.format(str(len(file_pairs))), LogLevel.debug)
         for pair in file_pairs:
-            self.log('Creating patch: {} -> {}'.format(pair[0], pair[1]), LogLevel.notice)
+            self.logger.log('Creating patch: {} -> {}'.format(pair[0], pair[1]), LogLevel.notice)
             cmd = [
-                'xdelta3',
+                self.xdelta_location,
                 '-e',        # Create patch
-                '-v' if self.log_level.numval <= LogLevel.notice.numval else '',  # Use verbose with verbose loglv
                 '-9',        # Use maximum compression
                 '-s',        # Read from file
                 pair[0],     # Old file
@@ -194,18 +242,28 @@ class BatchPatch:
                 os.path.join(target_dir, pair[2])    # Patch destination
             ]
 
+            if self.log_level.numval <= LogLevel.notice.numval:
+                # Pass verbose flag to xdelta if using a relatively verbose logging level
+                cmd.insert(2, '-v')
+            elif self.log_level.numval == LogLevel.silent.numval:
+                # Pass quiet flag if using the silent logging level
+                cmd.insert(2, '-q')
+
             try:
-                self.log('Starting subprocess, command line: {}'.format(" ".join(cmd)), LogLevel.debug)
+                self.logger.log('Starting subprocess, command line: {}'.format(" ".join(cmd)), LogLevel.debug)
                 ret = subprocess.call(cmd)
                 if ret != 0:
-                    self.log('xdelta returned a non-zero return value {}! '
-                             'This probably means something went wrong.'.format(str(ret)), LogLevel.warning)
+                    self.logger.log('xdelta returned a non-zero return value {}! '
+                                    'This probably means something went wrong.'.format(str(ret)), LogLevel.warning)
             except (OSError, IOError) as e:
-                self.log('Starting the subprocess failed! ' + e.strerror, LogLevel.warning)
+                self.logger.log('Starting the subprocess failed! ' + e.strerror, LogLevel.warning)
 
     def generate_win_script(self, file_pairs, target_dir):
-        fh = open(os.path.join(target_dir, 'apply.cmd'), mode='w', newline='\r\n', encoding='utf-8')
-        self.log('Generating Windows update script.'.format(str(len(file_pairs))), LogLevel.debug)
+        self.switch_languages(self.script_options['script_lang'])
+
+        fh = open(os.path.join(target_dir, self.script_options['script_name'] + '.cmd'),
+                  mode='w', newline='\r\n', encoding='utf-8')
+        self.logger.log('Generating Windows update script.'.format(str(len(file_pairs))), LogLevel.debug)
         fh.write('@echo off\n\n')
         fh.write('REM Generated by {} version {}\n'.format(self.PROG_NAME, self.PROG_VERSION))
         fh.write('REM on {}\n\n'.format(datetime.now(tz.tzlocal()).strftime("%Y-%m-%d %H:%M:%S %z (%Z)")))
@@ -214,8 +272,10 @@ class BatchPatch:
         fh.write('set nnum=0\n')
         fh.write('set fnum=0\n\n')
 
-        fh.write('IF NOT EXIST "xdelta3.exe" (\n')
-        fh.write('  echo The xdelta executable was not found! It is required for this script to work!\n')
+        fh.write('IF NOT EXIST "{}" (\n'.format(os.path.basename(self.xdelta_location)))
+        fh.write('  echo {msg}\n'.format(
+            msg=_('The xdelta executable was not found! It is required for this script to work!'))
+        )
         fh.write('  pause\n')
         fh.write('  exit /b 1\n')
         fh.write(')\n\n')
@@ -223,43 +283,64 @@ class BatchPatch:
         for pair in file_pairs:
             fh.write(
                 (
-                    'IF EXIST "{old}" (\n'
-                    '  IF NOT EXIST "{new}" (\n'
-                    '    echo Patching {old_esc}...\n'
-                    '    set /a pnum+=1\n'
-                    '    xdelta3 -d -v -s "{old}" "{patch}" "{new}" || (\n'
-                    '      echo Patching {old_esc} failed!\n'
-                    '      set /a pnum-=1\n'
-                    '      set /a fnum+=1\n'
-                    '    )\n'
-                    '  ) ELSE (\n'
-                    '    echo {new_esc} already exists, skipping...\n'
-                    '    set /a nnum+=1\n'
-                    '  )\n'
-                    ') ELSE (\n'
-                    '  echo {old_esc} not present in folder, skipping...\n'
-                    '  set /a nnum+=1\n'
+                    'IF EXIST "{old}" (\n' +
+                    '  IF NOT EXIST "{new}" (\n' +
+                    '    echo {msg}\n'.format(msg=_('Patching {old_esc}...')) +
+                    '    set /a pnum+=1\n' +
+                    '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n' +
+                    '      echo {msg}\n'.format(msg=_('Patching {old_esc} failed!')) +
+                    '      set /a pnum-=1\n' +
+                    '      set /a fnum+=1\n' +
+                    '    )\n' +
+                    '  ) ELSE (\n' +
+                    '    echo {msg}\n'.format(msg=_('{new_esc} already exists, skipping...')) +
+                    '    set /a nnum+=1\n' +
+                    '  )\n' +
+                    ') ELSE (\n' +
+                    '  echo {msg}\n'.format(msg=_('{old_esc} not present in folder, skipping...')) +
+                    '  set /a nnum+=1\n' +
                     ')\n'
                 ).format(
                     old=os.path.basename(pair[0]),
                     new=os.path.basename(pair[1]),
                     patch=os.path.basename(pair[2]),
                     old_esc=self.cmd_escape(os.path.basename(pair[0])),
-                    new_esc=self.cmd_escape(os.path.basename(pair[1]))
+                    new_esc=self.cmd_escape(os.path.basename(pair[1])),
+                    xdelta=os.path.basename(self.xdelta_location)
                 )
             )
 
-        fh.write('echo Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.\n')
+        fh.write('echo {msg}\n'.format(msg=_('Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.')))
         fh.write('pause\n')
         fh.close()
 
+        self.switch_languages('en_US')
+
     def copy_executable(self, target_dir):
-        self.log('Copying xdelta to the target folder {}.'.format(target_dir), LogLevel.debug)
+        self.logger.log('Copying xdelta to the target folder {}.'.format(target_dir), LogLevel.debug)
         shutil.copy(os.path.join(os.getcwd(), self.xdelta_location),
                     os.path.join(target_dir, os.path.basename(self.xdelta_location)))
 
+    def create_archive(self, file_pairs, target_dir):
+        zip_path = os.path.join(target_dir, self.archive_options['zip_name'])
+        self.logger.log('Creating a ZIP archive of the patch to \'{}\'.'.format(zip_path), LogLevel.debug)
+        zip = ZipFile(zip_path, 'w')
+
+        for pair in file_pairs:
+            self.logger.log('Writing: {}...'.format(pair[2]), LogLevel.debug)
+            zip.write(os.path.join(target_dir, pair[2]), pair[2])
+
+        self.logger.log('Writing the patch script...', LogLevel.debug)
+        zip.write(os.path.join(target_dir, self.script_options['script_name'] + '.cmd'),
+                  self.script_options['script_name'] + '.cmd')
+
+        self.logger.log('Writing the executable...', LogLevel.debug)
+        zip.write(os.path.join(target_dir, os.path.basename(self.xdelta_location)),
+                  os.path.basename(self.xdelta_location))
+        zip.close()
+
     def identify_file_pairs_by_name(self, old_dir, new_dir):
-        self.log('Identifying potential file pairs for patching.', LogLevel.debug)
+        self.logger.log('Identifying potential file pairs for patching.', LogLevel.debug)
 
         old_files = os.listdir(str(old_dir))
         new_files = os.listdir(str(new_dir))
@@ -267,8 +348,8 @@ class BatchPatch:
 
         for file in [self.create_file_entity(f, old_dir) for f in old_files]:
             if file is not None:
-                self.log('Found potential source file: {}'.format(file['filename']), LogLevel.debug)
-                self.log('  Group {}, series {}, type {} {}, episode {}, version {}'.format(
+                self.logger.log('Found potential source file: {}'.format(file['filename']), LogLevel.debug)
+                self.logger.log('  Group {}, series {}, type {} {}, episode {}, version {}'.format(
                     file['group'],
                     file['name'],
                     file['specifier'],
@@ -287,8 +368,8 @@ class BatchPatch:
             if file is not None:
                 key = file.get('key')
                 if key in filemap:
-                    self.log('Found potential target file: {}'.format(file['filename']), LogLevel.debug)
-                    self.log('  Group {}, series {}, type {} {}, episode {}, version {}'.format(
+                    self.logger.log('Found potential target file: {}'.format(file['filename']), LogLevel.debug)
+                    self.logger.log('  Group {}, series {}, type {} {}, episode {}, version {}'.format(
                         file['group'],
                         file['name'],
                         file['specifier'],
@@ -300,8 +381,8 @@ class BatchPatch:
                     filemap[key][1].append(file)
                 else:
                     # There were no matching files in the old directory, so this won't be a candidate for patching.
-                    self.log('Ignoring target file with no equivalent source: {}'.format(file['filename']),
-                             LogLevel.debug)
+                    self.logger.log('Ignoring target file with no equivalent source: {}'.format(file['filename']),
+                                    LogLevel.debug)
 
         # Let's prune those source files that were found that have no target equivalents.
         item_cnt = len(filemap)
@@ -310,7 +391,7 @@ class BatchPatch:
         if len(filemap) < item_cnt:
             diff = item_cnt - len(filemap)
 
-            self.log('Dropped {} source candidate{} with no equivalent targets.'.format(
+            self.logger.log('Dropped {} source candidate{} with no equivalent targets.'.format(
                 str(diff), '' if diff == 1 else 's'), LogLevel.debug)
 
         resolved_relations = []
@@ -319,7 +400,7 @@ class BatchPatch:
             highest_target = max(group[1], key=lambda x: x['ver'])
 
             if highest_source['ver'] == highest_target['ver']:
-                self.log('Source and target versions of {} are both {}, ignoring the group.'.format(
+                self.logger.log('Source and target versions of {} are both {}, ignoring the group.'.format(
                     key, highest_target['ver']
                 ), LogLevel.debug)
                 continue
@@ -327,7 +408,7 @@ class BatchPatch:
             patch_name = self.get_patch_name(highest_source, highest_target)
             resolved_relations.append((highest_source['filename'], highest_target['filename'], patch_name,
                                        highest_target['key']))
-            self.log('Queued: {} -> {}, patch name: {}'.format(
+            self.logger.log('Queued: {} -> {}, patch name: {}'.format(
                 highest_source['filename'], highest_target['filename'], patch_name
             ), LogLevel.debug)
 
@@ -337,22 +418,31 @@ class BatchPatch:
     def cmd_escape(s):
         return re.sub(r'([\[\]\(\)^<>|])', r'^\1', s)
 
-    @staticmethod
-    def get_patch_name(source, target):
-        return "{name}{specifier_items[0]}_{ep}_v{v_old}v{v_new}.vcdiff".format(
-            name=BatchPatch.neutralize_str(source['name']),
-            type=BatchPatch.neutralize_str(source['specifier'] + source['ext']),
-            group=BatchPatch.neutralize_str(source['group']),
-            ep=BatchPatch.neutralize_str(source['ep']),
-            v_old=source['ver'],
-            v_new=target['ver'],
-            specifier=BatchPatch.neutralize_str(source['specifier']),
-            specifier_items=[BatchPatch.neutralize_str(s) for s in (
-                source['specifier'].split() if len(source['specifier']) > 0 else ['']
-            )],
-            ext=BatchPatch.neutralize_str(source['ext'])
-        )
-        pass
+    def get_patch_name(self, source, target):
+        try:
+            return self.patch_options['filename_pattern'].format(
+                raw_group=source['group'],
+                raw_name=source['name'],
+                raw_ep=source['ep'],
+                raw_specifier=source['specifier'],
+                raw_ext=source['ext'],
+                group=BatchPatch.neutralize_str(source['group']),
+                name=BatchPatch.neutralize_str(source['name']),
+                ep=BatchPatch.neutralize_str(source['ep']),
+                specifier=BatchPatch.neutralize_str(source['specifier']),
+                specifier_items=[BatchPatch.neutralize_str(s) for s in (
+                    source['specifier'].split() if len(source['specifier']) > 0 else ['']
+                )],
+                type=BatchPatch.neutralize_str(source['specifier'] + source['ext']),
+                ext=BatchPatch.neutralize_str(source['ext']),
+                v_old=source['ver'],
+                v_new=target['ver'],
+                hash_old=source['crc'],
+                hash_new=target['crc']
+            )
+        except KeyError as e:
+            self.logger.log('Invalid variable {} in patch name pattern!'.format(e.args[0]), LogLevel.error)
+            exit()
 
     @staticmethod
     def create_file_entity(filename, basedir):
@@ -401,7 +491,13 @@ class BatchPatch:
         s = u"".join([c for c in s if not unicodedata.combining(c)])
         return re.sub(r'[^a-z0-9_-]', '_', s.casefold())
 
+    @staticmethod
+    def get_install_path():
+        return os.path.dirname(os.path.realpath(__file__))
+
 
 if __name__ == "__main__":
+    gettext.install('batchpatch', os.path.join(BatchPatch.get_install_path(), 'i18n'))
+
     prog = BatchPatch()
     prog.run()
