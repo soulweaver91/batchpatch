@@ -19,7 +19,7 @@ from logger import LogLevel, Logger
 
 class BatchPatch:
     PROG_NAME = 'BatchPatch'
-    PROG_VERSION = '0.1'
+    PROG_VERSION = '0.2'
     LOCALE_CATALOG = 'batchpatch'
 
     logger = None
