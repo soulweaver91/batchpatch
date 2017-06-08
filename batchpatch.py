@@ -232,13 +232,28 @@ class BatchPatch:
         self.logger.log('Generating patches for {} file pairs.'.format(str(len(file_pairs))), LogLevel.debug)
         for pair in file_pairs:
             self.logger.log('Creating patch: {} -> {}'.format(pair[0], pair[1]), LogLevel.notice)
+
+            effective_source = pair[0]
+            effective_target = pair[1]
+            temp_source_name = None
+            temp_target_name = None
+            if not pair[4]:
+                temp_source_name = '~' + os.path.basename(pair[2]) + '.src'
+                temp_target_name = '~' + os.path.basename(pair[2]) + '.dst'
+                self.logger.log(('Filename is not safe for xdelta on Windows. Copying files to temporary '
+                                'names {} and {}.').format(temp_source_name, temp_target_name), LogLevel.notice)
+                shutil.copyfile(pair[0], temp_source_name)
+                shutil.copyfile(pair[1], temp_target_name)
+                effective_source = temp_source_name
+                effective_target = temp_target_name
+
             cmd = [
                 self.xdelta_location,
                 '-e',        # Create patch
                 '-9',        # Use maximum compression
                 '-s',        # Read from file
-                pair[0],     # Old file
-                pair[1],     # New file
+                effective_source,     # Old file
+                effective_target,     # New file
                 os.path.join(target_dir, pair[2])    # Patch destination
             ]
 
@@ -255,6 +270,13 @@ class BatchPatch:
                 if ret != 0:
                     self.logger.log('xdelta returned a non-zero return value {}! '
                                     'This probably means something went wrong.'.format(str(ret)), LogLevel.warning)
+
+                if not pair[4]:
+                    self.logger.log('Removing temporary files.'.format(temp_source_name, temp_target_name),
+                                    LogLevel.notice)
+                    os.unlink(temp_source_name)
+                    os.unlink(temp_target_name)
+
             except (OSError, IOError) as e:
                 self.logger.log('Starting the subprocess failed! ' + e.strerror, LogLevel.warning)
 
@@ -283,34 +305,71 @@ class BatchPatch:
         fh.write(')\n\n')
 
         for pair in file_pairs:
-            fh.write(
-                (
-                    'IF EXIST "{old}" (\n' +
-                    '  IF NOT EXIST "{new}" (\n' +
-                    '    echo {msg}\n'.format(msg=_('Patching {old_esc}...')) +
-                    '    set /a pnum+=1\n' +
-                    '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n' +
-                    '      echo {msg}\n'.format(msg=_('Patching {old_esc} failed!')) +
-                    '      set /a pnum-=1\n' +
-                    '      set /a fnum+=1\n' +
-                    '    )\n' +
-                    '  ) ELSE (\n' +
-                    '    echo {msg}\n'.format(msg=_('{new_esc} already exists, skipping...')) +
-                    '    set /a nnum+=1\n' +
-                    '  )\n' +
-                    ') ELSE (\n' +
-                    '  echo {msg}\n'.format(msg=_('{old_esc} not present in folder, skipping...')) +
-                    '  set /a nnum+=1\n' +
-                    ')\n'
-                ).format(
-                    old=os.path.basename(pair[0]),
-                    new=os.path.basename(pair[1]),
-                    patch=os.path.basename(pair[2]),
-                    old_esc=self.cmd_escape(os.path.basename(pair[0])),
-                    new_esc=self.cmd_escape(os.path.basename(pair[1])),
-                    xdelta=os.path.basename(self.xdelta_location)
+            if pair[4]:
+                fh.write(
+                    (
+                        'IF EXIST "{old}" (\n' +
+                        '  IF NOT EXIST "{new}" (\n' +
+                        '    echo {msg}\n'.format(msg=_('Patching {old_esc}...')) +
+                        '    set /a pnum+=1\n' +
+                        '    "{xdelta}" -d -v -s "{old}" "{patch}" "{new}" || (\n' +
+                        '      echo {msg}\n'.format(msg=_('Patching {old_esc} failed!')) +
+                        '      set /a pnum-=1\n' +
+                        '      set /a fnum+=1\n' +
+                        '    )\n' +
+                        '  ) ELSE (\n' +
+                        '    echo {msg}\n'.format(msg=_('{new_esc} already exists, skipping...')) +
+                        '    set /a nnum+=1\n' +
+                        '  )\n' +
+                        ') ELSE (\n' +
+                        '  echo {msg}\n'.format(msg=_('{old_esc} not present in folder, skipping...')) +
+                        '  set /a nnum+=1\n' +
+                        ')\n'
+                    ).format(
+                        old=os.path.basename(pair[0]),
+                        new=os.path.basename(pair[1]),
+                        patch=os.path.basename(pair[2]),
+                        old_esc=self.cmd_escape(os.path.basename(pair[0])),
+                        new_esc=self.cmd_escape(os.path.basename(pair[1])),
+                        xdelta=os.path.basename(self.xdelta_location)
+                    )
                 )
-            )
+            else:
+                fh.write(
+                    (
+                        'IF EXIST "{old}" (\n' +
+                        '  IF NOT EXIST "{new}" (\n' +
+                        '    echo {msg}\n'.format(msg=_('Patching {old_esc}...')) +
+                        '    set /a pnum+=1\n' +
+                        '    REM xdelta unicode incompatibility workaround\n' +
+                        '    copy "{old}" "{intermediate_old}" > NUL\n' +
+                        '    "{xdelta}" -d -v -s "{intermediate_old}" "{patch}" "{intermediate_new}" || (\n' +
+                        '      echo {msg}\n'.format(msg=_('Patching {old_esc} failed!')) +
+                        '      set /a pnum-=1\n' +
+                        '      set /a fnum+=1\n' +
+                        '    )\n' +
+                        '    REM xdelta unicode incompatibility workaround\n' +
+                        '    move "{intermediate_new}" "{new}" > NUL\n' +
+                        '    del "{intermediate_old}" > NUL\n' +
+                        '  ) ELSE (\n' +
+                        '    echo {msg}\n'.format(msg=_('{new_esc} already exists, skipping...')) +
+                        '    set /a nnum+=1\n' +
+                        '  )\n' +
+                        ') ELSE (\n' +
+                        '  echo {msg}\n'.format(msg=_('{old_esc} not present in folder, skipping...')) +
+                        '  set /a nnum+=1\n' +
+                        ')\n'
+                    ).format(
+                        old=os.path.basename(pair[0]),
+                        new=os.path.basename(pair[1]),
+                        intermediate_old=('~' + os.path.basename(pair[2]) + '.src'),
+                        intermediate_new=('~' + os.path.basename(pair[2]) + '.dst'),
+                        patch=os.path.basename(pair[2]),
+                        old_esc=self.cmd_escape(os.path.basename(pair[0])),
+                        new_esc=self.cmd_escape(os.path.basename(pair[1])),
+                        xdelta=os.path.basename(self.xdelta_location)
+                    )
+                )
 
         fh.write('echo {msg}\n'.format(msg=_('Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.')))
         fh.write('chcp %cp% > NUL\n')
@@ -410,7 +469,9 @@ class BatchPatch:
 
             patch_name = self.get_patch_name(highest_source, highest_target)
             resolved_relations.append((highest_source['filename'], highest_target['filename'], patch_name,
-                                       highest_target['key']))
+                                       highest_target['key'],
+                                       self.is_name_windows_safe(os.path.basename(highest_source['filename'])) and
+                                       self.is_name_windows_safe(os.path.basename(highest_target['filename']))))
             self.logger.log('Queued: {} -> {}, patch name: {}'.format(
                 highest_source['filename'], highest_target['filename'], patch_name
             ), LogLevel.debug)
@@ -493,6 +554,19 @@ class BatchPatch:
         s = unicodedata.normalize('NFKD', name)
         s = u"".join([c for c in s if not unicodedata.combining(c)])
         return re.sub(r'[^a-z0-9_-]', '_', s.casefold())
+
+    unsafe_windows_filenames = [
+        'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    ]
+
+    @staticmethod
+    def is_name_windows_safe(name):
+        """ Verifies if the filename can be passed to xdelta on Windows. The user's codepage can be whatever,
+            so only accept a subset of the 7-bit ASCII as safe values.
+        """
+        return name not in BatchPatch.unsafe_windows_filenames and \
+               name == re.sub(r'[^ !#$%&()+,\-.0-9;=@A-Z\[\]^_`a-z{}]', r'', name)
 
     @staticmethod
     def get_install_path():
