@@ -372,8 +372,8 @@ class BatchPatch:
                 )
 
         fh.write('echo {msg}\n'.format(msg=_('Finished, with %pnum% files patched, %nnum% skipped and %fnum% failed.')))
-        fh.write('chcp %cp% > NUL\n')
         fh.write('pause\n')
+        fh.write('chcp %cp% > NUL\n')
         fh.close()
 
         self.switch_languages('en_US')
