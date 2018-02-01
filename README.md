@@ -12,8 +12,10 @@ for Windows with which the recipient can easily apply all of the patches to thei
 *   [Python 3](https://www.python.org/downloads/). More recent is probably better, written and tested on Python 3.4.3.
 *   [pip](https://pip.pypa.io/en/latest/installing.html), if it didn't come bundled with your version of Python 3.
 *   An [xdelta](https://github.com/jmacd/xdelta) executable, copied into the same folder as the script.
-    Dealing with different versions and xdelta's license requiring a full copy of source code distributed even with
-    only the executable itself is not ideal, so you'll have to do this manually.
+    Previously, xdelta was licensed under GPL 2.0, which put an unreasonable burden for any software repackaging even
+    the pre-built executable by requiring the source code also be provided with it. xdelta is now licensed under
+    Apache License, which does not have this requirement, so a copy xdelta might be packaged with BatchPatch by default
+    at some point in the future.
 
 ## Installing
 After cloning the repository, install dependencies:
