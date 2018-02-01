@@ -12,6 +12,7 @@ import subprocess
 import unicodedata
 import gettext
 import zipfile
+import zlib
 from datetime import datetime
 from dateutil import tz
 from logger import LogLevel, Logger
@@ -22,6 +23,7 @@ class BatchPatch:
     PROG_VERSION = '0.3'
     PROG_URL = 'https://github.com/soulweaver91/batchpatch'
     LOCALE_CATALOG = 'batchpatch'
+    CRC_BUFFER_SIZE = 65536
 
     logger = None
     script_options = {
@@ -112,8 +114,12 @@ class BatchPatch:
         parser.add_argument(
             '-z', '--zip',
             action='store_true',
-            help='Create a ZIP file out of the created patch files.',
-            default=self.xdelta_location
+            help='Create a ZIP file out of the created patch files.'
+        )
+        parser.add_argument(
+            '-c', '--check-crc',
+            action='store_true',
+            help='Verify CRC values of source and target files, if present.'
         )
         parser.add_argument(
             '--zip-name',
@@ -171,11 +177,17 @@ class BatchPatch:
             # Sort in alphabetical order for nicer output all around
             file_pairs.sort(key=lambda item: item[0])
 
+            if args.check_crc:
+                errors = self.check_crcs(file_pairs)
+                if len(errors) > 0:
+                    self.logger.log('One or more CRC values did not match, cannot proceed.', LogLevel.error)
+                    return
+
             self.generate_patches(file_pairs, args.target)
             self.generate_win_script(file_pairs, args.target)
             self.copy_executable(args.target)
 
-            if args.zip is not None:
+            if args.zip:
                 self.create_archive(file_pairs, args.target)
 
             self.logger.log('Done.', LogLevel.notice)
@@ -228,6 +240,32 @@ class BatchPatch:
             exit()
 
         self.logger.log('Prerequisites OK.', LogLevel.debug)
+
+    def check_crcs(self, file_pairs):
+        errors = []
+        for pair in file_pairs:
+            for file in [pair[5], pair[6]]:
+                if file["crc"] is None:
+                    continue
+
+                self.logger.log('Calculating CRC for {}...'.format(os.path.basename(file["filename"])), LogLevel.notice)
+
+                with open(file["filename"], 'rb') as f:
+                    buffer = f.read(self.CRC_BUFFER_SIZE)
+                    intermediate = 0
+
+                    while len(buffer) > 0:
+                        intermediate = zlib.crc32(buffer, intermediate)
+                        buffer = f.read(self.CRC_BUFFER_SIZE)
+
+                    crc = format(intermediate & 0xFFFFFFFF, '08x')
+                    self.logger.log('CRC is {}, filename says {}.'.format(crc, file["crc"]), LogLevel.notice)
+
+                    if crc.lower() != file["crc"].lower():
+                        self.logger.log('CRCs don\'t match!', LogLevel.error)
+                        errors.append(file["filename"])
+
+        return errors
 
     def generate_patches(self, file_pairs, target_dir):
         self.logger.log('Generating patches for {} file pairs.'.format(str(len(file_pairs))), LogLevel.debug)
@@ -470,10 +508,13 @@ class BatchPatch:
                 continue
 
             patch_name = self.get_patch_name(highest_source, highest_target)
+            # TODO: refactor, these are too complex and confusing to be tuples anymore
             resolved_relations.append((highest_source['filename'], highest_target['filename'], patch_name,
                                        highest_target['key'],
                                        self.is_name_windows_safe(os.path.basename(highest_source['filename'])) and
-                                       self.is_name_windows_safe(os.path.basename(highest_target['filename']))))
+                                       self.is_name_windows_safe(os.path.basename(highest_target['filename'])),
+                                       highest_source,
+                                       highest_target))
             self.logger.log('Queued: {} -> {}, patch name: {}'.format(
                 highest_source['filename'], highest_target['filename'], patch_name
             ), LogLevel.debug)
