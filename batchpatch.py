@@ -11,7 +11,7 @@ import colorama
 import subprocess
 import unicodedata
 import gettext
-from zipfile import ZipFile
+import zipfile
 from datetime import datetime
 from dateutil import tz
 from logger import LogLevel, Logger
@@ -242,7 +242,7 @@ class BatchPatch:
                 temp_source_name = '~' + os.path.basename(pair[2]) + '.src'
                 temp_target_name = '~' + os.path.basename(pair[2]) + '.dst'
                 self.logger.log(('Filename is not safe for xdelta on Windows. Copying files to temporary '
-                                'names {} and {}.').format(temp_source_name, temp_target_name), LogLevel.notice)
+                                 'names {} and {}.').format(temp_source_name, temp_target_name), LogLevel.notice)
                 shutil.copyfile(pair[0], temp_source_name)
                 shutil.copyfile(pair[1], temp_target_name)
                 effective_source = temp_source_name
@@ -388,20 +388,20 @@ class BatchPatch:
     def create_archive(self, file_pairs, target_dir):
         zip_path = os.path.join(target_dir, self.archive_options['zip_name'])
         self.logger.log('Creating a ZIP archive of the patch to \'{}\'.'.format(zip_path), LogLevel.debug)
-        zip = ZipFile(zip_path, 'w')
+        zipped = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
 
         for pair in file_pairs:
             self.logger.log('Writing: {}...'.format(pair[2]), LogLevel.debug)
-            zip.write(os.path.join(target_dir, pair[2]), pair[2])
+            zipped.write(os.path.join(target_dir, pair[2]), pair[2])
 
         self.logger.log('Writing the patch script...', LogLevel.debug)
-        zip.write(os.path.join(target_dir, self.script_options['script_name'] + '.cmd'),
-                  self.script_options['script_name'] + '.cmd')
+        zipped.write(os.path.join(target_dir, self.script_options['script_name'] + '.cmd'),
+                     self.script_options['script_name'] + '.cmd')
 
         self.logger.log('Writing the executable...', LogLevel.debug)
-        zip.write(os.path.join(target_dir, os.path.basename(self.xdelta_location)),
-                  os.path.basename(self.xdelta_location))
-        zip.close()
+        zipped.write(os.path.join(target_dir, os.path.basename(self.xdelta_location)),
+                     os.path.basename(self.xdelta_location))
+        zipped.close()
 
     def identify_file_pairs_by_name(self, old_dir, new_dir):
         self.logger.log('Identifying potential file pairs for patching.', LogLevel.debug)
